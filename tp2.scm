@@ -15,7 +15,6 @@
 ;;; Scheme dans votre codage (donc n'utilisez pas set!, set-car!,
 ;;; begin, etc).
 
-
 ;;; La fonction traiter reçoit en paramètre une liste de caractères
 ;;; contenant la requête lue et le dictionnaire des variables sous
 ;;; forme d'une liste d'association.  La fonction retourne
@@ -24,17 +23,30 @@
 ;;; fonctions ne doivent pas faire d'affichage car c'est la fonction
 ;;; "repl" qui se charge de cela.
 
+(define operators '(#\+ #\- #\* #\/))
+
+; That --> https://stackoverflow.com/questions/5397144/how-do-i-compare-the-symbol-a-with-the-character-a
+(define (char->symbol ch)
+  (string->symbol (string ch)))
+
+(define stack-eval-chelou
+  (lambda (op a b)
+    (eval `(,(char->symbol op) ,a ,b))))
+
+(define traitement
+  (lambda (expr dict stack)
+    (if (null? expr)
+      (cons (number->string (car stack)) dict)
+      (cond
+        ((member (car expr) operators)
+          (traitement (cdr expr) dict (stack))))
+        ((char-numeric? (car expr))
+          (print "shat")))))
+
 (define traiter
   (lambda (expr dict)
-    (cons (append (string->list "*** le programme est ")
-                  '(#\I #\N #\C #\O #\M #\P #\L #\E #\T #\! #\newline)
-                  (string->list "*** la requete lue est: ")
-                  expr
-                  (string->list "\n*** le dictionnaire contient: ")
-                  dict
-                  (string->list "\n*** nombre de caractères: ")
-                  (string->list (number->string (length expr)))
-                  '(#\newline))
+    (traitement expr dict '())
+    (cons '(#\S #\h #\i #\t #\newline)
           dict)))
 
 ;;;----------------------------------------------------------------------------
@@ -52,7 +64,7 @@
 
 (define traiter-ligne
   (lambda (ligne dict)
-    (traiter (string->list ligne) dict)))
+    (traiter (string->list ligne)  dict)))
 
 (define main
   (lambda ()
