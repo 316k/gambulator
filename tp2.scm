@@ -23,31 +23,62 @@
 ;;; fonctions ne doivent pas faire d'affichage car c'est la fonction
 ;;; "repl" qui se charge de cela.
 
-(define operators '(#\+ #\- #\* #\/))
+
+(define & (lambda (a b) (and a b)))
+
+(define operators
+  '((#\+ #\- #\* #\/ #\> #\< #\&) 2))
+
+(define car-or-false
+  (lambda (list)
+    (if (null? list)
+        #f
+        (car list))))
 
 ; That --> https://stackoverflow.com/questions/5397144/how-do-i-compare-the-symbol-a-with-the-character-a
 (define (char->symbol ch)
   (string->symbol (string ch)))
 
-(define stack-eval-chelou
-  (lambda (op a b)
-    (eval `(,(char->symbol op) ,a ,b))))
+(define (char->number ch)
+  (- (char->integer ch) (char->integer #\0)))
 
-(define traitement
-  (lambda (expr dict stack)
+(define boolean->number
+  (lambda (x) (if x 1 0)))
+
+; Dépile 2 arguments de stack et empile le résultat de op dessus
+(define stack-eval-chelou
+  (lambda (op stack)
+    (cons
+      (let ((out ((eval (char->symbol op)) (car stack) (cadr stack))))
+        (if (boolean? out)
+          (boolean->number out)
+          out))
+      (cddr stack))))
+
+(define post-eval
+  (lambda (expr dict stack building-number?)
     (if (null? expr)
-      (cons (number->string (car stack)) dict)
-      (cond
-        ((member (car expr) operators)
-          (traitement (cdr expr) dict (stack))))
-        ((char-numeric? (car expr))
-          (print "shat")))))
+      (cons
+        (if (null? stack)
+          (string->list "Rien à faire\n")
+          (append (string->list (number->string (car stack))) '(#\newline))) dict)
+      (let ((stack-top (car-or-false stack)) (symbol (car expr)) (rest (cdr expr)))
+        (cond
+          ((member symbol (car operators)) ; opérateurs
+            (post-eval rest dict (stack-eval-chelou symbol stack) #f))
+          ((char-numeric? symbol) ; entrée de nombres
+            (if building-number?
+              (post-eval rest dict
+                  (cons (+ (char->number symbol) (* 10 stack-top)) (cdr stack)) #t)
+              (post-eval rest dict
+                  (cons (char->number symbol) stack) #t)))
+          (else ; espaces et caractères inconnus
+            (post-eval rest dict stack #f)))))))
 
 (define traiter
   (lambda (expr dict)
-    (traitement expr dict '())
-    (cons '(#\S #\h #\i #\t #\newline)
-          dict)))
+    (post-eval expr dict '() #f)))
+;    (cons (string->list "123") dict)))
 
 ;;;----------------------------------------------------------------------------
 
@@ -69,5 +100,5 @@
 (define main
   (lambda ()
     (repl '()))) ;; dictionnaire initial est vide
-    
+
 ;;;----------------------------------------------------------------------------
