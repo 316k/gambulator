@@ -26,8 +26,7 @@
 
 (define & (lambda (a b) (and a b)))
 
-(define operators
-  '((#\+ #\- #\* #\/ #\> #\< #\&) 2))
+(define operators '(#\+ #\- #\* #\/ #\> #\< #\&))
 
 (define car-or-false
   (lambda (list)
@@ -55,6 +54,30 @@
           out))
       (cddr stack))))
 
+; Helpers pour les tables d'association
+(define (lookup key env)
+  (let ((pair (assoc key env)))
+    (and pair (cadr pair ))))
+
+(define remove-assoc
+  (lambda args
+    (if (= (length args) 2)
+      (remove-assoc (car args) (cadr args) '())
+      (let ((key (car args)) (old-env (cadr args)) (new-env (caddr args)))
+        (if (null? old-env)
+          new-env
+          (if (eq? (caar old-env) key)
+            (remove-assoc key (cdr old-env) new-env) ; skip le symbole à enlever
+            (remove-assoc key (cdr old-env) (append new-env (list (car old-env))))))))))
+
+(define (add-assoc key val env)
+  (append env (list (list key val))))
+
+(define (update-assoc key val env)
+  (if (assoc key env)
+      (add-assoc key val (remove-assoc key env))
+      (add-assoc key val env)))
+
 (define post-eval
   (lambda (expr dict stack building-number?)
     (if (null? expr)
@@ -64,21 +87,26 @@
           (append (string->list (number->string (car stack))) '(#\newline))) dict)
       (let ((stack-top (car-or-false stack)) (symbol (car expr)) (rest (cdr expr)))
         (cond
-          ((member symbol (car operators)) ; opérateurs
-            (post-eval rest dict (stack-eval-chelou symbol stack) #f))
+          ((member symbol operators) ; opérateurs
+            (if (>= (length stack) 2)
+                (post-eval rest dict (stack-eval-chelou symbol stack) #f)
+                (post-eval '() dict stack #f)))
           ((char-numeric? symbol) ; entrée de nombres
             (if building-number?
               (post-eval rest dict
                   (cons (+ (char->number symbol) (* 10 stack-top)) (cdr stack)) #t)
               (post-eval rest dict
                   (cons (char->number symbol) stack) #t)))
+          ((and (char-ci=? symbol #\=) stack-top); sauvegarde de variables
+            (post-eval (cdr rest) (update-assoc (cadr expr) stack-top dict) stack #f))
+          ((lookup symbol dict) ; sauvegarde de variables
+            (post-eval rest dict (cons (lookup symbol dict) stack) #f))
           (else ; espaces et caractères inconnus
             (post-eval rest dict stack #f)))))))
 
 (define traiter
   (lambda (expr dict)
     (post-eval expr dict '() #f)))
-;    (cons (string->list "123") dict)))
 
 ;;;----------------------------------------------------------------------------
 
