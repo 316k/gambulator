@@ -45,7 +45,7 @@
   (lambda (x) (if x 1 0)))
 
 ; Dépile 2 arguments de stack et empile le résultat de op dessus
-(define stack-eval-chelou
+(define stack-eval
   (lambda (op stack)
     (cons
       (let ((out ((eval (char->symbol op)) (car stack) (cadr stack))))
@@ -84,29 +84,44 @@
       (cons
         (if (null? stack)
           (string->list "Rien à faire\n")
-          (append (string->list (number->string (car stack))) '(#\newline))) dict)
+          (append (string->list (number->string (car stack))) '(#\newline)))
+        dict)
       (let ((stack-top (car-or-false stack)) (symbol (car expr)) (rest (cdr expr)))
         (cond
-          ((member symbol operators) ; opérateurs
-            (if (>= (length stack) 2)
-                (post-eval rest dict (stack-eval-chelou symbol stack) #f)
-                (post-eval '() dict stack #f)))
+          ((and (member symbol operators) (>= (length stack) 2))
+                (post-eval rest dict (stack-eval symbol stack) #f))
           ((char-numeric? symbol) ; entrée de nombres
             (if building-number?
               (post-eval rest dict
                   (cons (+ (char->number symbol) (* 10 stack-top)) (cdr stack)) #t)
               (post-eval rest dict
                   (cons (char->number symbol) stack) #t)))
-          ((and (char-ci=? symbol #\=) stack-top); sauvegarde de variables
+          ((and stack-top (char-ci=? symbol #\=) (not (null? rest)) (char-lower-case? (car rest))) ; sauvegarde de variables
             (post-eval (cdr rest) (update-assoc (cadr expr) stack-top dict) stack #f))
-          ((lookup symbol dict) ; sauvegarde de variables
+          ((lookup symbol dict) ; push de variables
             (post-eval rest dict (cons (lookup symbol dict) stack) #f))
-          (else ; espaces et caractères inconnus
-            (post-eval rest dict stack #f)))))))
+          ((char-ci=? symbol #\space) ; espaces
+            (post-eval rest dict stack #f))
+          ; Erreurs
+          ((member symbol operators)
+            (raise "Pas assez d'arguments sur la pile \n"))
+          ((and (char-lower-case? symbol) (char-alphabetic? symbol))
+            (raise (string-append (string symbol) " n'a pas de valeur\n")))
+          ((char-ci=? symbol #\=)
+            (raise (string-append "Impossible d'effectuer l'assignation demandée\n")))
+          (else
+            (raise (string-append "Caractère inconnu `" (string symbol) "`\n"))))))))
+
+;(update-assoc (cadr expr) (list->string (cddr expr)) dict) ; Enregistrement de macros A-Z
+;(if (and (char-ci=? (car expr) #\:) (char-upper-case? (cadr expr)))
 
 (define traiter
   (lambda (expr dict)
-    (post-eval expr dict '() #f)))
+    (with-exception-catcher ; traitement des erreurs
+      (lambda (e)
+        (cons (string->list (string-append "Erreur d'entrée : " e)) dict))
+      (lambda ()
+        (post-eval expr dict '() #f)))))
 
 ;;;----------------------------------------------------------------------------
 
@@ -123,7 +138,7 @@
 
 (define traiter-ligne
   (lambda (ligne dict)
-    (traiter (string->list ligne)  dict)))
+    (traiter (string->list ligne) dict)))
 
 (define main
   (lambda ()
