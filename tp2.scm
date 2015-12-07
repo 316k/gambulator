@@ -3,30 +3,10 @@
 
 ;;; Fichier : tp2.scm
 
-;;; Ce programme est une version incomplete du TP2.  Vous devez uniquement
-;;; changer et ajouter du code dans la première section.
-
-;;;----------------------------------------------------------------------------
-
-;;; Vous devez modifier cette section.  La fonction "traiter" doit
-;;; être définie, et vous pouvez ajouter des définitions de fonction
-;;; afin de bien décomposer le traitement à faire en petites
-;;; fonctions.  Il faut vous limiter au sous-ensemble *fonctionnel* de
-;;; Scheme dans votre codage (donc n'utilisez pas set!, set-car!,
-;;; begin, etc).
-
-;;; La fonction traiter reçoit en paramètre une liste de caractères
-;;; contenant la requête lue et le dictionnaire des variables sous
-;;; forme d'une liste d'association.  La fonction retourne
-;;; une paire contenant la liste de caractères qui sera imprimée comme
-;;; résultat de l'expression entrée et le nouveau dictionnaire.  Vos
-;;; fonctions ne doivent pas faire d'affichage car c'est la fonction
-;;; "repl" qui se charge de cela.
-
-
 (define & (lambda (a b) (and a b)))
+(define my-or (lambda (a b) (or a b)))
 
-(define operators '(#\+ #\- #\* #\/ #\> #\< #\&))
+(define operators `((#\+ . ,+) (#\- . ,-) (#\* . ,*) (#\/ . ,/) (#\> . ,>) (#\< . ,<) (#\& . ,&) (#\| . ,my-or)))
 
 (define car-or-false
   (lambda (list)
@@ -41,14 +21,13 @@
 (define (char->number ch)
   (- (char->integer ch) (char->integer #\0)))
 
-(define boolean->number
-  (lambda (x) (if x 1 0)))
+(define (boolean->number x) (if x 1 0))
 
 ; Dépile 2 arguments de stack et empile le résultat de op dessus
 (define stack-eval
   (lambda (op stack)
     (cons
-      (let ((out ((eval (char->symbol op)) (car stack) (cadr stack))))
+      (let ((out ((lookup op operators) (car stack) (cadr stack))))
         (if (boolean? out)
           (boolean->number out)
           out))
@@ -57,11 +36,11 @@
 ; Helpers pour les tables d'association
 (define (lookup key env)
   (let ((pair (assoc key env)))
-    (and pair (cadr pair ))))
+    (and pair (cdr pair))))
 
 (define remove-assoc
   (lambda args
-    (if (= (length args) 2)
+    (if (= (length args) 2) ; 2 arguments : key env
       (remove-assoc (car args) (cadr args) '())
       (let ((key (car args)) (old-env (cadr args)) (new-env (caddr args)))
         (if (null? old-env)
@@ -70,58 +49,90 @@
             (remove-assoc key (cdr old-env) new-env) ; skip le symbole à enlever
             (remove-assoc key (cdr old-env) (append new-env (list (car old-env))))))))))
 
+'((a 1) (c 3))
+
 (define (add-assoc key val env)
-  (append env (list (list key val))))
+  (cons (cons key val) env))
 
 (define (update-assoc key val env)
   (if (assoc key env)
       (add-assoc key val (remove-assoc key env))
       (add-assoc key val env)))
 
+; (number/rest '(#\1 #\2 #\3 #\= #\a)) => (123 #\= #\a)
+(define (number/rest expr)
+  (let enumerate-shitz ((expr expr) (built '()))
+    (if (and (not (null? expr)) (char-numeric? (car expr)))
+      (enumerate-shitz (cdr expr) (cons (car expr) built))
+      (cons (string->number (list->string (reverse built))) expr))))
+
+(define semicolon #\;)
+
+(define (procedure/rest expr)
+  (let find-semicolon ((expr expr) (built '()))
+    (cond
+     ((or (null? expr) (char=? (car expr) #\:))
+      #f)
+     ((not (char=? (car expr) semicolon))
+      (find-semicolon (cdr expr) (cons (car expr) built)))
+     (else
+      (cons (reverse built) (cdr expr))))))
+
 (define post-eval
-  (lambda (expr dict stack building-number?)
+  (lambda (expr dict stack exception-handler)
     (if (null? expr)
       (cons
         (if (null? stack)
           (string->list "Rien à faire\n")
           (append (string->list (number->string (car stack))) '(#\newline)))
         dict)
-      (let ((stack-top (car-or-false stack)) (symbol (car expr)) (rest (cdr expr)))
+      (let ((stack-top (car-or-false stack))
+            (symbol (car expr))
+            (rest (cdr expr)))
         (cond
-          ((and (member symbol operators) (>= (length stack) 2))
-                (post-eval rest dict (stack-eval symbol stack) #f))
-          ((char-numeric? symbol) ; entrée de nombres
-            (if building-number?
-              (post-eval rest dict
-                  (cons (+ (char->number symbol) (* 10 stack-top)) (cdr stack)) #t)
-              (post-eval rest dict
-                  (cons (char->number symbol) stack) #t)))
-          ((and stack-top (char-ci=? symbol #\=) (not (null? rest)) (char-lower-case? (car rest))) ; sauvegarde de variables
-            (post-eval (cdr rest) (update-assoc (cadr expr) stack-top dict) stack #f))
-          ((lookup symbol dict) ; push de variables
-            (post-eval rest dict (cons (lookup symbol dict) stack) #f))
-          ((char-ci=? symbol #\space) ; espaces
-            (post-eval rest dict stack #f))
+         ((and (lookup symbol operators)
+               (>= (length stack) 2))
+          (post-eval rest dict (stack-eval symbol stack) exception-handler))
+         ((char-numeric? symbol) ; entrée de nombres
+          (let ((n/r (number/rest expr)))
+            (post-eval (cdr n/r) dict (cons (car n/r) stack) exception-handler)))
+         ((and stack-top
+               (char=? symbol #\=)
+               (not (null? rest))
+               (char-lower-case? (car rest))) ; sauvegarde de variables
+          (post-eval (cdr rest) (update-assoc (cadr expr) stack-top dict) stack exception-handler))
+         ((and (eq? symbol #\:)
+               (not (null? rest))
+               (not (null? (cdr rest)))
+               (char-upper-case? (cadr expr)))
+          (let ((p/r (procedure/rest (cdr rest))))
+            (if p/r
+                (post-eval (cdr p/r) (update-assoc (cadr expr) (car p/r) dict) stack exception-handler)
+                (exception-handler "Mauvaise définition de procédure\n"))))
+         ((lookup symbol dict) ; push de variables
+          (if (char-upper-case? symbol)
+              (post-eval (append (lookup symbol dict) rest) dict stack exception-handler)
+              (post-eval rest dict (cons (lookup symbol dict) stack) exception-handler)))
+         ((char=? symbol #\space) ; espaces
+          (post-eval rest dict stack exception-handler))
           ; Erreurs
-          ((member symbol operators)
-            (raise "Pas assez d'arguments sur la pile \n"))
-          ((and (char-lower-case? symbol) (char-alphabetic? symbol))
-            (raise (string-append (string symbol) " n'a pas de valeur\n")))
-          ((char-ci=? symbol #\=)
-            (raise (string-append "Impossible d'effectuer l'assignation demandée\n")))
-          (else
-            (raise (string-append "Caractère inconnu `" (string symbol) "`\n"))))))))
+         ((lookup symbol operators)
+          (exception-handler "Pas assez d'arguments sur la pile \n"))
+         ((and (char-lower-case? symbol) (char-alphabetic? symbol))
+          (exception-handler (string-append (string symbol) " n'a pas de valeur\n")))
+         ((and (char-upper-case? symbol) (char-alphabetic? symbol))
+          (exception-handler (string-append "La procédure " (string symbol) " n'est pas une définie\n")))
+         ((char=? symbol #\:)
+          (exception-handler "Impossible d'effectuer l'assignation de procédure demandée\n"))
+         ((char=? symbol #\=)
+          (exception-handler "Impossible d'effectuer l'assignation demandée\n"))
+         (else
+          (exception-handler "Caractère inconnu `" (string symbol) "`\n")))))))
 
-;(update-assoc (cadr expr) (list->string (cddr expr)) dict) ; Enregistrement de macros A-Z
-;(if (and (char-ci=? (car expr) #\:) (char-upper-case? (cadr expr)))
-
-(define traiter
-  (lambda (expr dict)
-    (with-exception-catcher ; traitement des erreurs
-      (lambda (e)
-        (cons (string->list (string-append "Erreur d'entrée : " e)) dict))
-      (lambda ()
-        (post-eval expr dict '() #f)))))
+(define (traiter expr dict)
+  (post-eval expr dict '()
+    (lambda (e)
+      (cons (string->list (string-append "Erreur d'entrée : " e)) dict))))
 
 ;;;----------------------------------------------------------------------------
 
