@@ -27,7 +27,7 @@
 (define stack-eval
   (lambda (op stack)
     (cons
-      (let ((out ((lookup op operators) (car stack) (cadr stack))))
+      (let ((out ((lookup op operators) (cadr stack) (car stack))))
         (if (boolean? out)
           (boolean->number out)
           out))
