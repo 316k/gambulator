@@ -6,7 +6,7 @@
 (define & (lambda (a b) (and a b)))
 (define my-or (lambda (a b) (or a b)))
 
-(define operators `((#\+ . ,+) (#\- . ,-) (#\* . ,*) (#\/ . ,/) (#\> . ,>) (#\< . ,<) (#\& . ,&) (#\| . ,my-or)))
+(define operators `((#\+ . ,+) (#\- . ,-) (#\* . ,*) (#\> . ,>) (#\< . ,<) (#\& . ,&) (#\| . ,my-or)))
 
 (define car-or-false
   (lambda (list)
@@ -49,8 +49,6 @@
             (remove-assoc key (cdr old-env) new-env) ; skip le symbole à enlever
             (remove-assoc key (cdr old-env) (append new-env (list (car old-env))))))))))
 
-'((a 1) (c 3))
-
 (define (add-assoc key val env)
   (cons (cons key val) env))
 
@@ -61,9 +59,9 @@
 
 ; (number/rest '(#\1 #\2 #\3 #\= #\a)) => (123 #\= #\a)
 (define (number/rest expr)
-  (let enumerate-shitz ((expr expr) (built '()))
+  (let loop ((expr expr) (built '()))
     (if (and (not (null? expr)) (char-numeric? (car expr)))
-      (enumerate-shitz (cdr expr) (cons (car expr) built))
+      (loop (cdr expr) (cons (car expr) built))
       (cons (string->number (list->string (reverse built))) expr))))
 
 (define semicolon #\;)
@@ -78,12 +76,12 @@
      (else
       (cons (reverse built) (cdr expr))))))
 
-(define post-eval
+(define process-input
   (lambda (expr dict stack exception-handler)
     (if (null? expr)
       (cons
         (if (null? stack)
-          (string->list "Rien à faire\n")
+          (string->list "Aucun résultat\n")
           (append (string->list (number->string (car stack))) '(#\newline)))
         dict)
       (let ((stack-top (car-or-false stack))
@@ -92,29 +90,29 @@
         (cond
          ((and (lookup symbol operators)
                (>= (length stack) 2))
-          (post-eval rest dict (stack-eval symbol stack) exception-handler))
+          (process-input rest dict (stack-eval symbol stack) exception-handler))
          ((char-numeric? symbol) ; entrée de nombres
           (let ((n/r (number/rest expr)))
-            (post-eval (cdr n/r) dict (cons (car n/r) stack) exception-handler)))
+            (process-input (cdr n/r) dict (cons (car n/r) stack) exception-handler)))
          ((and stack-top
                (char=? symbol #\=)
                (not (null? rest))
                (char-lower-case? (car rest))) ; sauvegarde de variables
-          (post-eval (cdr rest) (update-assoc (cadr expr) stack-top dict) stack exception-handler))
+          (process-input (cdr rest) (update-assoc (cadr expr) stack-top dict) stack exception-handler))
          ((and (eq? symbol #\:)
                (not (null? rest))
                (not (null? (cdr rest)))
                (char-upper-case? (cadr expr)))
           (let ((p/r (procedure/rest (cdr rest))))
             (if p/r
-                (post-eval (cdr p/r) (update-assoc (cadr expr) (car p/r) dict) stack exception-handler)
+                (process-input (cdr p/r) (update-assoc (cadr expr) (car p/r) dict) stack exception-handler)
                 (exception-handler "Mauvaise définition de procédure\n"))))
          ((lookup symbol dict) ; push de variables
           (if (char-upper-case? symbol)
-              (post-eval (append (lookup symbol dict) rest) dict stack exception-handler)
-              (post-eval rest dict (cons (lookup symbol dict) stack) exception-handler)))
+              (process-input (append (lookup symbol dict) rest) dict stack exception-handler)
+              (process-input rest dict (cons (lookup symbol dict) stack) exception-handler)))
          ((char=? symbol #\space) ; espaces
-          (post-eval rest dict stack exception-handler))
+          (process-input rest dict stack exception-handler))
           ; Erreurs
          ((lookup symbol operators)
           (exception-handler "Pas assez d'arguments sur la pile \n"))
@@ -127,10 +125,10 @@
          ((char=? symbol #\=)
           (exception-handler "Impossible d'effectuer l'assignation demandée\n"))
          (else
-          (exception-handler "Caractère inconnu `" (string symbol) "`\n")))))))
+          (exception-handler (string-append "Caractère inconnu `" (string symbol) "`\n"))))))))
 
 (define (traiter expr dict)
-  (post-eval expr dict '()
+  (process-input expr dict '()
     (lambda (e)
       (cons (string->list (string-append "Erreur d'entrée : " e)) dict))))
 
